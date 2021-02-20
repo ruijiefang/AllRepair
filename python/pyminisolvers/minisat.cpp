@@ -25,6 +25,13 @@ extern "C" {
     // Control whether random polarities are used (overridden if vars are created with a user polarity other than Undef)
     void setRndPol(Solver* s, bool val) { s->rnd_pol = val; }
 
+    // Control whether variables are intialized with a random initial activity
+    // (default: False)
+    void setRndInitAct(Solver* s, bool val) { s->rnd_init_act = val; }
+
+    // Initialize the solver's random seed
+    void setRndSeed(Solver* s, double seed) { assert(seed != 0.0); s->random_seed = seed; }
+
     // polarity: 0=False, 1=True, 2=Undef
     int newVar(Solver* s, uint8_t polarity, bool dvar=true) { return s->newVar(lbool(polarity), dvar); }
 
@@ -47,6 +54,22 @@ extern "C" {
         }
         return s->solve(assumptions);
     }
+    bool check_complete(Solver* s, const int len, const int* lits, const bool pos) {
+        int n = s->nVars();
+        vec<Lit> assumptions;
+        bool * specified = new bool[n+1]();
+        for (int i = 0 ; i < len ; i++) {
+            assumptions.push( itoLit(lits[i]) );
+            specified[pos ? lits[i] : -lits[i]] = true;
+        }
+        for (int i = 1 ; i < n+1 ; i++) {
+            if (!specified[i]) {
+                assumptions.push( itoLit(pos ? -i : i) );
+            }
+        }
+        delete[] specified;
+        return s->solve(assumptions);
+    }
 
     bool simplify(Solver* s) { return s->simplify(); }
 
@@ -61,20 +84,25 @@ extern "C" {
         }
     }
 
-    int getModelTrues(Solver* s, int* trues, int from, int to) {
+    int getModelTrues(Solver* s, int* trues, int from, int to, int offset) {
         int count = 0;
         for (int i = from ; i < to ; i++) {
-            if (s->modelValue(i) == l_True) trues[count++] = i-from;
+            if (s->modelValue(i) == l_True) trues[count++] = i - from + offset;
         }
         return count;
+    }
+
+    // returns the size of the current conflict
+    int conflictSize(Solver* s) {
+        return s->conflict.size();
     }
 
     // returns a core with 0-based counting
     // (i.e., first clause is 0, etc.)
     // (subtracts given number of original variables from conflict variables)
-    int unsatCore(Solver* s, int nv, int* core) {
+    int unsatCore(Solver* s, int nv, int* core, int offset) {
         for (int i = 0 ; i < s->conflict.size() ; i++) {
-            core[i] = var(s->conflict[i]) - nv;
+            core[i] = var(s->conflict[i]) - nv + offset;
         }
         return s->conflict.size();
     }
@@ -92,4 +120,29 @@ extern "C" {
         }
         return len;
     }
+
+    // fills an array w/ any literals known to be implied by the current formula
+    // and any given assumptions (i.e., all 0-level assignments)
+    // returns number of elements in the filled array
+    int getImplies_assumptions(Solver* s, int* assigns, int* assumps, int assumps_size) {
+        vec<Lit> assumptions;
+        for (int i = 0 ; i < assumps_size ; i++) {
+            assumptions.push( itoLit(assumps[i]) );
+        }
+        vec<Lit> outvec;
+        s->implies(assumptions, outvec, true);
+        int len = outvec.size();
+        for (int i = 0 ; i < len ; i++) {
+            assigns[i] = Littoi(outvec[i]);
+        }
+        return len;
+    }
+
+    // getter methods for accessing solver statistics
+    uint64_t get_solves(Solver* s) { return s->solves; }
+    uint64_t get_starts(Solver* s) { return s->starts; }
+    uint64_t get_decisions(Solver* s) { return s->decisions; }
+    uint64_t get_rnd_decisions(Solver* s) { return s->rnd_decisions; }
+    uint64_t get_propagations(Solver* s) { return s->propagations; }
+    uint64_t get_conflicts(Solver* s) { return s->conflicts; }
 }
